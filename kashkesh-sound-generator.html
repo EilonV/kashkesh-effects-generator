@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kashkesh Audio Lab + Noise & Import</title>
+    <style>
+        :root { --bg: #121212; --card: #1e1e1e; --primary: #bb86fc; --secondary: #03dac6; --accent: #ff7597; --text: #e1e1e1; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; display: grid; grid-template-columns: 1fr 380px; gap: 20px; max-width: 1300px; margin: 0 auto; }
+        .panel { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); margin-bottom: 20px; }
+        .control-group { margin-bottom: 12px; }
+        label { display: flex; justify-content: space-between; font-size: 13px; color: #aaa; margin-bottom: 5px; }
+        input, select, textarea { width: 100%; background: #2c2c2c; border: 1px solid #444; color: white; padding: 8px; border-radius: 6px; box-sizing: border-box; }
+        button { padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; margin-top: 5px; }
+        .play-btn { background: var(--secondary); color: #000; width: 100%; }
+        .noise-btn { background: var(--accent); color: #000; width: 100%; }
+        .import-btn { background: #fff; color: #000; width: 100%; margin-top: 10px; }
+        .list-container { height: 200px; overflow-y: auto; background: #121212; border-radius: 6px; padding: 10px; border: 1px solid #333; margin-top: 5px; }
+        .sound-item { background: #2c2c2c; padding: 8px; margin-bottom: 8px; border-radius: 4px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; }
+        pre { background: #000; padding: 12px; border-radius: 6px; color: #00ff00; font-size: 11px; overflow-x: auto; }
+        canvas { width: 100%; height: 100px; background: #000; border-radius: 6px; margin-bottom: 20px; }
+        h3 { margin-top: 0; color: var(--primary); font-size: 18px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="left-col">
+    <div class="panel">
+        <h3>Oscilloscope</h3>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <div class="panel">
+        <h3>Tone Lab</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div class="control-group"><label>Type</label><select id="type"><option value="sine">Sine</option><option value="triangle">Triangle</option><option value="square">Square</option><option value="sawtooth">Sawtooth</option></select></div>
+            <div class="control-group"><label>Frequency <span id="freqVal">440Hz</span></label><input type="range" id="frequency" min="50" max="2500" value="440"></div>
+            <div class="control-group"><label>Duration <span id="durVal">0.2s</span></label><input type="range" id="duration" min="0.01" max="2" step="0.01" value="0.2"></div>
+            <div class="control-group"><label>Volume <span id="gainVal">0.3</span></label><input type="range" id="gain" min="0" max="1" step="0.05" value="0.3"></div>
+        </div>
+        <button class="play-btn" onclick="handlePlayTone()">▶ PLAY TONE</button>
+        <pre id="toneCode">playTone({ frequency: 440, type: 'sine', duration: 0.2, gain: 0.3 });</pre>
+    </div>
+
+    <div class="panel">
+        <h3>Noise Lab</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div class="control-group"><label>Noise Duration <span id="nDurVal">0.1s</span></label><input type="range" id="nDuration" min="0.01" max="1" step="0.01" value="0.1"></div>
+            <div class="control-group"><label>Noise Volume <span id="nGainVal">0.15</span></label><input type="range" id="nGain" min="0" max="1" step="0.05" value="0.15"></div>
+            <div class="control-group"><label>Bandpass Filter <span id="nFiltVal">1000Hz</span></label><input type="range" id="nFilter" min="100" max="5000" step="50" value="1000"></div>
+        </div>
+        <button class="noise-btn" onclick="handlePlayNoise()">≋ PLAY NOISE</button>
+        <pre id="noiseCode">playNoise({ duration: 0.1, gain: 0.15 });</pre>
+    </div>
+</div>
+
+<div class="right-col">
+    <div class="panel">
+        <h3>Quick Import / Test</h3>
+        <p style="font-size: 11px; color: #888;">Paste lines from your code to test them instantly:</p>
+        <textarea id="importBox" rows="6" placeholder="playNoise({ duration: 0.12, gain: 0.2 });&#10;playTone({ frequency: 440, type: 'square', duration: 0.15, gain: 0.12, delay: 0.05 });"></textarea>
+        <button class="import-btn" onclick="runImportedCode()">⚡ RUN CODE</button>
+    </div>
+
+    <div class="panel">
+        <h3>Saved & History</h3>
+        <label>Recent History</label>
+        <div id="historyList" class="list-container"></div>
+        <div style="margin-top: 15px;">
+            <input type="text" id="saveName" placeholder="Sound Name">
+            <button class="play-btn" style="background: var(--primary)" onclick="saveCurrent()">💾 SAVE CURRENT</button>
+        </div>
+        <div id="savedList" class="list-container"></div>
+    </div>
+</div>
+
+<script>
+    let ctx = null, analyzer = null, history = [];
+
+    function getCtx() {
+        if (!ctx) {
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+            analyzer = ctx.createAnalyser();
+            analyzer.connect(ctx.destination);
+        }
+        if (ctx.state === 'suspended') ctx.resume();
+        return ctx;
+    }
+
+    // --- ENGINES ---
+    function playTone({ frequency = 440, type = 'sine', duration = 0.2, gain = 0.3, delay = 0, ramp = false }) {
+        const c = getCtx();
+        const osc = c.createOscillator();
+        const gNode = c.createGain();
+        osc.connect(gNode);
+        gNode.connect(analyzer);
+        osc.type = type;
+        osc.frequency.setValueAtTime(frequency, c.currentTime + delay);
+        gNode.gain.setValueAtTime(0, c.currentTime + delay);
+        gNode.gain.linearRampToValueAtTime(gain, c.currentTime + delay + 0.01);
+        if (ramp) {
+            gNode.gain.linearRampToValueAtTime(0, c.currentTime + delay + duration);
+        } else {
+            gNode.gain.setValueAtTime(gain, c.currentTime + delay + duration - 0.02);
+            gNode.gain.linearRampToValueAtTime(0, c.currentTime + delay + duration);
+        }
+        osc.start(c.currentTime + delay);
+        osc.stop(c.currentTime + delay + duration + 0.01);
+        draw();
+    }
+
+    function playNoise({ duration = 0.1, gain = 0.15, delay = 0, filterFreq = 1000 }) {
+        const c = getCtx();
+        const bufferSize = c.sampleRate * duration;
+        const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        const source = c.createBufferSource();
+        source.buffer = buffer;
+        const gNode = c.createGain();
+        const filter = c.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = filterFreq;
+        source.connect(filter);
+        filter.connect(gNode);
+        gNode.connect(analyzer);
+        gNode.gain.setValueAtTime(gain, c.currentTime + delay);
+        gNode.gain.linearRampToValueAtTime(0, c.currentTime + delay + duration);
+        source.start(c.currentTime + delay);
+        draw();
+    }
+
+    // --- UI HANDLERS ---
+    function handlePlayTone() {
+        const s = {
+            frequency: parseFloat(document.getElementById('frequency').value),
+            type: document.getElementById('type').value,
+            duration: parseFloat(document.getElementById('duration').value),
+            gain: parseFloat(document.getElementById('gain').value)
+        };
+        playTone(s);
+        addToHistory('Tone', s);
+    }
+
+    function handlePlayNoise() {
+        const s = {
+            duration: parseFloat(document.getElementById('nDuration').value),
+            gain: parseFloat(document.getElementById('nGain').value),
+            filterFreq: parseFloat(document.getElementById('nFilter').value)
+        };
+        playNoise(s);
+        addToHistory('Noise', s);
+    }
+
+    function runImportedCode() {
+        const code = document.getElementById('importBox').value;
+        try {
+            // Safety: We use a Function constructor here to run the code in context
+            new Function('playTone', 'playNoise', code)(playTone, playNoise);
+        } catch (e) {
+            alert("Error in code: " + e.message);
+        }
+    }
+
+    function updateUI() {
+        // Tone
+        const f = document.getElementById('frequency').value, t = document.getElementById('type').value, d = document.getElementById('duration').value, g = document.getElementById('gain').value;
+        document.getElementById('freqVal').innerText = f + 'Hz'; document.getElementById('durVal').innerText = d + 's'; document.getElementById('gainVal').innerText = g;
+        document.getElementById('toneCode').innerText = `playTone({ frequency: ${f}, type: '${t}', duration: ${d}, gain: ${g} });`;
+        // Noise
+        const nd = document.getElementById('nDuration').value, ng = document.getElementById('nGain').value, nf = document.getElementById('nFilter').value;
+        document.getElementById('nDurVal').innerText = nd + 's'; document.getElementById('nGainVal').innerText = ng; document.getElementById('nFiltVal').innerText = nf + 'Hz';
+        document.getElementById('noiseCode').innerText = `playNoise({ duration: ${nd}, gain: ${ng}, filterFreq: ${nf} });`;
+    }
+
+    function addToHistory(type, settings) {
+        history.unshift({ type, settings, time: new Date().toLocaleTimeString() });
+        renderHistory();
+    }
+
+    function renderHistory() {
+        document.getElementById('historyList').innerHTML = history.slice(0,10).map(item => `
+            <div class="sound-item" onclick='console.log(${JSON.stringify(item.settings)})'>
+                <span>[${item.type}]</span> <span>${item.time}</span>
+            </div>
+        `).join('');
+    }
+
+    // --- VISUALIZER ---
+    const canvas = document.getElementById('visualizer'), canvasCtx = canvas.getContext('2d');
+    function draw() {
+        if (!analyzer) return;
+        requestAnimationFrame(draw);
+        const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+        analyzer.getByteTimeDomainData(dataArray);
+        canvasCtx.fillStyle = '#000'; canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+        canvasCtx.lineWidth = 2; canvasCtx.strokeStyle = '#bb86fc'; canvasCtx.beginPath();
+        let sliceWidth = canvas.width / dataArray.length, x = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+            let v = dataArray[i] / 128.0, y = v * canvas.height / 2;
+            if (i === 0) canvasCtx.moveTo(x, y); else canvasCtx.lineTo(x, y);
+            x += sliceWidth;
+        }
+        canvasCtx.lineTo(canvas.width, canvas.height / 2); canvasCtx.stroke();
+    }
+
+    document.querySelectorAll('input, select').forEach(el => el.oninput = updateUI);
+</script>
+</body>
+</html>
